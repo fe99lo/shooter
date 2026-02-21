@@ -21,14 +21,13 @@
         #root { position: relative; width: 100vw; height: 100vh; z-index: 10; pointer-events: none; }
         .pointer-events-auto { pointer-events: auto; }
         
-        /* The background is now set to tile and move for the parallax effect */
         .forest-bg { 
             background-image: url('forest-bg.jpg'); 
             background-size: cover; 
+            background-position: center bottom;
             background-color: #1a2e1a; 
-            position: absolute; inset: -50%; z-index: 0; pointer-events: none; 
+            position: absolute; inset: 0; z-index: 0; pointer-events: none; 
             filter: brightness(0.65); 
-            transition: transform 0.1s linear;
         }
         
         .pop-text { font-family: 'Permanent Marker', cursive; text-shadow: 2px 4px 0px #000; animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
@@ -38,7 +37,7 @@
     </style>
 </head>
 <body>
-    <div class="forest-bg" id="parallax-bg"></div>
+    <div class="forest-bg"></div>
     <div id="root"></div>
 
     <script type="text/babel">
@@ -51,19 +50,17 @@
         function App() {
             const [gameState, setGameState] = useState('LOADING'); 
             const scoreRef = useRef(null), accuracyRef = useRef(null), rankRef = useRef(null), comboRef = useRef(null), announcerRef = useRef(null), canvasRef = useRef(null);
-            const bgRef = useRef(null);
             
-            const assets = useRef({ catapult: null, birdFly: null, birdHop: null, stone: null });
+            // Note: Removed the stone image asset, using Canvas drawing instead.
+            const assets = useRef({ catapult: null, birdFly: null, birdHop: null });
 
             useEffect(() => {
-                bgRef.current = document.getElementById('parallax-bg');
                 const loadAssets = async () => {
                     try {
                         if (typeof AssetProcessor !== 'undefined') {
                             assets.current.catapult = await AssetProcessor.processImage('catapult.png', 120, 180, true);
                             assets.current.birdFly = await AssetProcessor.processImage('bird-fly-spritesheet.png', 300, 100, true); 
                             assets.current.birdHop = await AssetProcessor.processImage('bird-hopper.png', 60, 60, true);
-                            assets.current.stone = await AssetProcessor.processImage('stone.png', 24, 24, true);
                         }
                         setGameState('MENU');
                     } catch (err) {
@@ -92,13 +89,6 @@
                 const ctx = canvas.getContext('2d', { alpha: true });
                 const resize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
                 window.addEventListener('resize', resize); resize();
-
-                // THE VIRTUAL WORLD
-                const WORLD_W = 3000;
-                const WORLD_H = 1500;
-                
-                // Camera starts at the bottom left (on the ground)
-                let camera = { x: 0, y: WORLD_H - canvas.height };
 
                 // Metrics
                 let score = 0, shotsFired = 0, birdsHit = 0, combo = 0, misses = 0, accuracy = 100;
@@ -129,11 +119,9 @@
                 };
 
                 // MULTI-INTERACTION PHYSICS ENTITIES
-                let anchor = { x: canvas.width / 2, y: WORLD_H - 150 }; // Anchor is in WORLD coordinates
+                let anchor = { x: canvas.width / 2, y: canvas.height - 150 }; 
                 let drag = { active: false, x: anchor.x, y: anchor.y };
                 let isDraggingBase = false; 
-                let isPanningCamera = false;
-                let lastPan = { x: 0, y: 0 };
                 let catapultAngle = 0; 
                 
                 let stones = [], birds = [], particles = [], floatingTexts = [];
@@ -145,18 +133,19 @@
                 }
 
                 class Stone {
-                    constructor(x, y, vx, vy) { this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.radius = 8; this.active = true; }
+                    constructor(x, y, vx, vy) { this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.radius = 10; this.active = true; }
                     update(dt) {
                         this.vy += 800 * dt; 
                         this.x += this.vx * dt; this.y += this.vy * dt;
-                        if (this.y > WORLD_H || this.x > WORLD_W || this.x < 0) { this.active = false; misses++; combo = 0; updateMetrics(); }
+                        if (this.y > canvas.height || this.x > canvas.width || this.x < 0) { this.active = false; misses++; combo = 0; updateMetrics(); }
                     }
                     draw(ctx) {
-                        if (assets.current.stone) {
-                            ctx.drawImage(assets.current.stone, this.x - 12, this.y - 12, 24, 24);
-                        } else {
-                            ctx.fillStyle = '#9ca3af'; ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); ctx.fill();
-                        }
+                        // Drawn Canvas Stone (No image asset needed)
+                        ctx.fillStyle = '#9ca3af'; 
+                        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); ctx.fill();
+                        // Add a little highlight for texture
+                        ctx.fillStyle = '#d1d5db'; 
+                        ctx.beginPath(); ctx.arc(this.x - 3, this.y - 3, 3, 0, Math.PI * 2); ctx.fill();
                     }
                 }
 
@@ -165,18 +154,16 @@
                         this.type = Math.random() > 0.4 ? 'flyer' : 'hopper'; 
                         this.radius = 20;
                         this.direction = Math.random() > 0.5 ? 1 : -1; 
-                        this.x = this.direction === 1 ? -100 : WORLD_W + 100;
+                        this.x = this.direction === 1 ? -100 : canvas.width + 100;
                         this.speed = (120 + (score * 0.1)) * (Math.random() * 0.5 + 0.8);
                         
                         if (this.type === 'flyer') {
-                            // Flyers spawn high in the canopy (top half of the world)
-                            this.y = Math.random() * (WORLD_H * 0.4) + 100;
+                            this.y = Math.random() * (canvas.height * 0.5) + 80;
                             this.baseY = this.y;
                             this.sineFreq = Math.random() * 3 + 2;
                             this.time = 0;
                         } else {
-                            // Hoppers spawn firmly on the ground
-                            this.y = WORLD_H - 80; 
+                            this.y = canvas.height - 80; 
                             this.vy = -Math.random() * 300 - 300; 
                         }
                         this.active = true;
@@ -190,9 +177,9 @@
                         } else if (this.type === 'hopper') {
                             this.vy += 900 * dt; 
                             this.y += this.vy * dt;
-                            if (this.y > WORLD_H - 80) { this.y = WORLD_H - 80; this.vy = -Math.random() * 300 - 200; }
+                            if (this.y > canvas.height - 80) { this.y = canvas.height - 80; this.vy = -Math.random() * 300 - 200; }
                         }
-                        if ((this.direction === -1 && this.x < -100) || (this.direction === 1 && this.x > WORLD_W + 100)) {
+                        if ((this.direction === -1 && this.x < -100) || (this.direction === 1 && this.x > canvas.width + 100)) {
                             this.active = false;
                         }
                     }
@@ -219,7 +206,7 @@
                     draw(ctx) { if (this.life <= 0) return; ctx.globalAlpha = this.life; ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(this.x | 0, this.y | 0, 3, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1.0; }
                 }
 
-                // WORLD-SPACE INPUT HANDLING
+                // SCREEN-SPACE INPUT HANDLING
                 const getScreenPos = (e) => {
                     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
                     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
@@ -228,68 +215,39 @@
 
                 const startDrag = (e) => {
                     if (e.touches && e.touches.length > 1) return;
-                    const screenPos = getScreenPos(e);
-                    // Convert screen position to world position
-                    const worldPos = { x: screenPos.x + camera.x, y: screenPos.y + camera.y };
+                    const pos = getScreenPos(e);
                     
-                    // Zone 1: Did they grab the pouch to shoot?
-                    if (Math.hypot(worldPos.x - drag.x, worldPos.y - drag.y) < 80) {
-                        drag.active = true; drag.x = worldPos.x; drag.y = worldPos.y;
+                    // Zone 1: Pouch
+                    if (Math.hypot(pos.x - drag.x, pos.y - drag.y) < 80) {
+                        drag.active = true; drag.x = pos.x; drag.y = pos.y;
                         if (audioCtx.current) audioCtx.current.resume(); playSound('stretch');
                         return;
                     }
 
-                    // Zone 2: Did they grab the wooden base to move it?
-                    if (Math.hypot(worldPos.x - anchor.x, worldPos.y - anchor.y) < 100) {
+                    // Zone 2: Base Movement
+                    if (Math.hypot(pos.x - anchor.x, pos.y - anchor.y) < 100) {
                         isDraggingBase = true;
                         return;
                     }
-
-                    // Zone 3: They grabbed empty space. Start panning camera!
-                    isPanningCamera = true;
-                    lastPan = { x: screenPos.x, y: screenPos.y };
                 };
 
                 const handleDrag = (e) => {
+                    if (!drag.active && !isDraggingBase) return;
                     e.preventDefault();
-                    const screenPos = getScreenPos(e);
-                    const worldPos = { x: screenPos.x + camera.x, y: screenPos.y + camera.y };
-
-                    if (isPanningCamera) {
-                        // Move camera opposite of drag (like dragging a map)
-                        const dx = screenPos.x - lastPan.x;
-                        const dy = screenPos.y - lastPan.y;
-                        
-                        camera.x -= dx;
-                        camera.y -= dy;
-
-                        // Clamp camera to world bounds
-                        if (camera.x < 0) camera.x = 0;
-                        if (camera.x > WORLD_W - canvas.width) camera.x = WORLD_W - canvas.width;
-                        if (camera.y < 0) camera.y = 0;
-                        if (camera.y > WORLD_H - canvas.height) camera.y = WORLD_H - canvas.height;
-
-                        // Update Parallax Background
-                        if (bgRef.current) {
-                            bgRef.current.style.transform = `translate(${-camera.x * 0.2}px, ${-camera.y * 0.2}px)`;
-                        }
-
-                        lastPan = { x: screenPos.x, y: screenPos.y };
-                        return;
-                    }
+                    const pos = getScreenPos(e);
                     
                     if (isDraggingBase) {
-                        anchor.x = worldPos.x; anchor.y = worldPos.y;
+                        anchor.x = pos.x; anchor.y = pos.y;
                         drag.x = anchor.x; drag.y = anchor.y;
                         return;
                     }
 
                     if (drag.active) {
-                        const dx = worldPos.x - anchor.x, dy = worldPos.y - anchor.y;
+                        const dx = pos.x - anchor.x, dy = pos.y - anchor.y;
                         const dist = Math.hypot(dx, dy), maxPull = 120;
                         
                         if (dist > maxPull) { drag.x = anchor.x + (dx / dist) * maxPull; drag.y = anchor.y + (dy / dist) * maxPull; } 
-                        else { drag.x = worldPos.x; drag.y = worldPos.y; }
+                        else { drag.x = pos.x; drag.y = pos.y; }
 
                         catapultAngle = Math.atan2(drag.y - anchor.y, drag.x - anchor.x) - (Math.PI / 2);
                         if (catapultAngle > Math.PI / 2.5) catapultAngle = Math.PI / 2.5;
@@ -298,10 +256,6 @@
                 };
 
                 const releaseDrag = (e) => {
-                    if (isPanningCamera) {
-                        isPanningCamera = false;
-                        return;
-                    }
                     if (isDraggingBase) {
                         isDraggingBase = false;
                         return;
@@ -338,7 +292,6 @@
 
                     stones.forEach(s => s.update(dt)); birds.forEach(b => b.update(dt)); particles.forEach(p => p.update(dt)); floatingTexts.forEach(f => f.update(dt));
 
-                    // Collisions
                     for (let s of stones) {
                         if (!s.active) continue;
                         for (let b of birds) {
@@ -362,17 +315,8 @@
                     stones = stones.filter(s => s.active); birds = birds.filter(b => b.active);
                     particles = particles.filter(p => p.life > 0); floatingTexts = floatingTexts.filter(f => f.life > 0);
 
-                    // Render World
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                     
-                    ctx.save();
-                    // APPLY CAMERA PAN
-                    ctx.translate(-camera.x, -camera.y);
-
-                    // Draw the Forest Floor (Ground)
-                    ctx.fillStyle = '#061a10'; 
-                    ctx.fillRect(0, WORLD_H - 120, WORLD_W, 120);
-
                     // --- DRAW DYNAMIC CATAPULT & VISIBLE POUCH ---
                     ctx.save();
                     ctx.translate(anchor.x, anchor.y);
@@ -388,23 +332,27 @@
                     const rotatedDragX = dx * Math.cos(-catapultAngle) - dy * Math.sin(-catapultAngle);
                     const rotatedDragY = dx * Math.sin(-catapultAngle) + dy * Math.cos(-catapultAngle);
                     
+                    // 1. Back Band
                     ctx.strokeStyle = '#854d0e'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(-20, -50); ctx.lineTo(rotatedDragX, rotatedDragY); ctx.stroke();
                     
+                    // 2. Drawn Canvas Stone (Always Visible when active)
                     if (drag.active) {
-                        if (assets.current.stone) {
-                            ctx.drawImage(assets.current.stone, rotatedDragX - 12, rotatedDragY - 12, 24, 24);
-                        } else {
-                            ctx.fillStyle = '#9ca3af'; ctx.beginPath(); ctx.arc(rotatedDragX, rotatedDragY, 8, 0, Math.PI*2); ctx.fill();
-                        }
+                        ctx.fillStyle = '#9ca3af'; 
+                        ctx.beginPath(); ctx.arc(rotatedDragX, rotatedDragY, 10, 0, Math.PI*2); ctx.fill();
+                        ctx.fillStyle = '#d1d5db'; 
+                        ctx.beginPath(); ctx.arc(rotatedDragX - 3, rotatedDragY - 3, 3, 0, Math.PI*2); ctx.fill();
                     }
 
+                    // 3. Pouch cradling the stone
                     if (drag.active) {
                         ctx.fillStyle = '#78350f'; 
-                        ctx.beginPath(); ctx.ellipse(rotatedDragX, rotatedDragY + 4, 14, 8, 0, 0, Math.PI); ctx.fill();
+                        ctx.beginPath(); ctx.ellipse(rotatedDragX, rotatedDragY + 5, 15, 8, 0, 0, Math.PI); ctx.fill();
                     }
 
+                    // 4. Front Band
                     ctx.strokeStyle = '#a16207'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(20, -50); ctx.lineTo(rotatedDragX, rotatedDragY); ctx.stroke();
 
+                    // 5. Wooden Base
                     if (assets.current.catapult) {
                         ctx.drawImage(assets.current.catapult, -60, -90); 
                     } else {
@@ -417,8 +365,6 @@
 
                     // Entities
                     birds.forEach(b => b.draw(ctx)); stones.forEach(s => s.draw(ctx)); particles.forEach(p => p.draw(ctx)); floatingTexts.forEach(f => f.draw(ctx));
-
-                    ctx.restore(); // Restore camera translation
 
                     animationFrameId = requestAnimationFrame(gameLoop);
                 };
@@ -461,8 +407,7 @@
                             <div ref={announcerRef} className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 text-5xl md:text-7xl font-black text-center pop-text opacity-0 z-30 pointer-events-none w-full tracking-widest drop-shadow-[0_0_20px_rgba(0,0,0,1)]"></div>
                             
                             <div className="absolute bottom-8 w-full flex flex-col items-center gap-1 text-gray-400/50 text-xs md:text-sm font-bold tracking-widest pointer-events-none">
-                                <span>DRAG EMPTY SPACE TO LOOK AROUND</span>
-                                <span>PULL POUCH TO SHOOT</span>
+                                <span>DRAG BASE TO MOVE • PULL POUCH TO SHOOT</span>
                             </div>
                         </>
                     )}
